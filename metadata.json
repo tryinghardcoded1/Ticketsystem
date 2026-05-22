@@ -1,0 +1,10 @@
+{
+  "name": "Remix: Ai PoweredTicket System  By Philly Car Rental",
+  "description": "An internal operations dashboard for managing vehicle rentals, customer documents, and AI-powered parking ticket matching.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

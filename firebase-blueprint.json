@@ -1,0 +1,118 @@
+{
+  "entities": {
+    "Customer": {
+      "title": "Customer",
+      "description": "A rental customer",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Full name" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "driverLicenseUrl": { "type": "string" },
+        "insuranceUrl": { "type": "string" },
+        "signatureUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "phone"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "A car in the fleet",
+      "type": "object",
+      "properties": {
+        "plateNumber": { "type": "string" },
+        "make": { "type": "string" },
+        "model": { "type": "string" },
+        "year": { "type": "integer" },
+        "color": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "rented", "maintenance"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["plateNumber", "make", "model"]
+    },
+    "Rental": {
+      "title": "Rental",
+      "description": "A vehicle rental record",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "completed", "pending", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerName", "plateNumber", "startDate", "endDate"]
+    },
+    "Ticket": {
+      "title": "Ticket",
+      "description": "A traffic or parking ticket",
+      "type": "object",
+      "properties": {
+        "plateNumber": { "type": "string" },
+        "violationDate": { "type": "string", "format": "date-time" },
+        "amount": { "type": "number" },
+        "matchedCustomer": { "type": "string" },
+        "rentalId": { "type": "string" },
+        "status": { "type": "string", "enum": ["unpaid", "paid", "contested"] },
+        "ticketImage": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["plateNumber", "violationDate", "amount"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "A comment/note attached to a ticket or rental",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "author": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "author"]
+    },
+    "User": {
+      "title": "User",
+      "description": "System user with roles",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "ADMIN", "STAFF"] },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "System users and roles"
+    },
+    "customers": {
+      "schema": "Customer",
+      "description": "Collection of rental customers"
+    },
+    "vehicles": {
+      "schema": "Vehicle",
+      "description": "Collection of cars in the fleet"
+    },
+    "rentals": {
+      "schema": "Rental",
+      "description": "Collection of rental transactions"
+    },
+    "tickets": {
+      "schema": "Ticket",
+      "description": "Collection of recorded tickets"
+    },
+    "tickets/{ticketId}/notes": {
+      "schema": "Note",
+      "description": "Notes attached to a specific ticket"
+    },
+    "rentals/{rentalId}/notes": {
+      "schema": "Note",
+      "description": "Notes attached to a specific rental"
+    }
+  }
+}

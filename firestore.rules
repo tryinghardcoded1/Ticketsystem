@@ -1,0 +1,130 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Primitives & Helpers
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isEmailVerified() { return request.auth.token.email_verified == true; }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'license4booking@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role in ['ADMIN', 'SUPER_ADMIN'])
+      );
+    }
+
+    function isStaff() {
+      return isSignedIn() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'STAFF')
+      );
+    }
+
+    // 3. Validation Blueprints
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt']) &&
+             data.email is string && data.email.size() <= 100 &&
+             data.role in ['SUPER_ADMIN', 'ADMIN', 'STAFF', 'USER'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['name', 'email', 'phone']) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.email is string && data.email.size() <= 100 &&
+             data.phone is string && data.phone.size() <= 20;
+    }
+
+    function isValidVehicle(data) {
+      return data.keys().hasAll(['plateNumber', 'make', 'model']) &&
+             data.plateNumber is string && data.plateNumber.size() <= 20 &&
+             data.make is string && data.make.size() <= 50 &&
+             data.model is string && data.model.size() <= 50;
+    }
+
+    function isValidRental(data) {
+      return data.keys().hasAll(['customerName', 'plateNumber', 'startDate', 'endDate', 'status']) &&
+             data.customerName is string && data.customerName.size() <= 100 &&
+             data.plateNumber is string && data.plateNumber.size() <= 20 &&
+             data.startDate is timestamp &&
+             data.endDate is timestamp &&
+             data.status in ['active', 'completed', 'pending', 'cancelled'];
+    }
+
+    function isValidTicket(data) {
+      return data.keys().hasAll(['plateNumber', 'violationDate', 'amount', 'status']) &&
+             data.plateNumber is string && data.plateNumber.size() <= 20 &&
+             data.violationDate is timestamp &&
+             data.amount is number &&
+             data.status in ['unpaid', 'paid', 'contested'];
+    }
+
+    function isValidNote(data) {
+      return data.keys().hasAll(['text', 'author', 'timestamp']) &&
+             data.text is string && data.text.size() <= 5000 &&
+             data.author is string &&
+             data.timestamp is timestamp;
+    }
+
+    // 4. Collection Matches
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming()) && (incoming().role in ['USER', 'STAFF'] || isAdmin());
+      allow update: if isAdmin() && isValidUser(incoming());
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow read: if isStaff();
+      allow create: if isStaff() && isValidCustomer(incoming());
+      allow update: if isStaff() && isValidCustomer(incoming());
+      allow delete: if isAdmin();
+    }
+
+    match /vehicles/{plateNumber} {
+      allow read: if isStaff();
+      allow write: if isAdmin() && isValidVehicle(incoming());
+    }
+
+    match /rentals/{rentalId} {
+      allow read: if isStaff();
+      allow create: if isStaff() && isValidRental(incoming());
+      allow update: if isStaff() && isValidRental(incoming());
+      allow delete: if isStaff();
+
+      match /notes/{noteId} {
+        allow read: if isStaff();
+        allow create: if isStaff() && isValidNote(incoming());
+        allow update, delete: if isStaff();
+      }
+    }
+
+    match /tickets/{ticketId} {
+      allow read: if isStaff();
+      allow create: if isStaff() && isValidTicket(incoming());
+      allow update: if isStaff() && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'matchedCustomer', 'rentalId'])
+      );
+      allow delete: if isStaff();
+
+      match /notes/{noteId} {
+        allow read: if isStaff();
+        allow create: if isStaff() && isValidNote(incoming());
+        allow update, delete: if isStaff();
+      }
+    }
+  }
+}
