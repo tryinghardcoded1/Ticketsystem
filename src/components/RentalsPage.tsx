@@ -52,6 +52,7 @@ export default function RentalsPage() {
   const [loading, setLoading] = React.useState(true);
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedRental, setSelectedRental] = React.useState<Rental | null>(null);
+  const [selectedRentalIds, setSelectedRentalIds] = React.useState<Set<string>>(new Set());
 
   const [confirmModal, setConfirmModal] = React.useState<{
     isOpen: boolean;
@@ -448,6 +449,87 @@ export default function RentalsPage() {
     });
   };
 
+  const deleteRental = async (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Rental Record',
+      message: 'Are you sure you want to delete this rental record? All associated notes and data for this rental will be permanently deleted.',
+      confirmText: 'Delete Rental',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          // Delete all notes subcollection docs first
+          const notesSnapshot = await getDocs(collection(db, 'rentals', id, 'notes'));
+          const noteDeletePromises = notesSnapshot.docs.map(nDoc => deleteDoc(doc(db, 'rentals', id, 'notes', nDoc.id)));
+          await Promise.all(noteDeletePromises);
+
+          // Delete the rental doc itself
+          await deleteDoc(doc(db, 'rentals', id));
+          setRentals(prev => prev.filter(r => r.id !== id));
+          setSelectedRental(null);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'rental');
+        }
+      }
+    });
+  };
+
+  const toggleSelectRental = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = new Set(selectedRentalIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedRentalIds(next);
+  };
+
+  const toggleSelectAllRentals = () => {
+    if (filteredRentals.length === 0) return;
+    if (selectedRentalIds.size === filteredRentals.length) {
+      setSelectedRentalIds(new Set());
+    } else {
+      setSelectedRentalIds(new Set(filteredRentals.map(r => r.id)));
+    }
+  };
+
+  const handleBulkDeleteRentals = async () => {
+    if (selectedRentalIds.size === 0) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Selected Rentals',
+      message: `Are you sure you want to delete the ${selectedRentalIds.size} selected rental record(s)? All comments and linked sub-data will be permanently deleted.`,
+      confirmText: `Delete ${selectedRentalIds.size} Rentals`,
+      type: 'danger',
+      onConfirm: async () => {
+        setLoading(true);
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        try {
+          const batchPromises = (Array.from(selectedRentalIds) as string[]).map(async (id) => {
+            const notesSnapshot = await getDocs(collection(db, 'rentals', id, 'notes'));
+            const notePromises = notesSnapshot.docs.map(nDoc => deleteDoc(doc(db, 'rentals', id, 'notes', nDoc.id)));
+            await Promise.all(notePromises);
+            return deleteDoc(doc(db, 'rentals', id));
+          });
+          await Promise.all(batchPromises);
+
+          setRentals(prev => prev.filter(r => !selectedRentalIds.has(r.id)));
+          if (selectedRental && selectedRentalIds.has(selectedRental.id)) {
+            setSelectedRental(null);
+          }
+          setSelectedRentalIds(new Set());
+          alert(`Successfully deleted ${selectedRentalIds.size} rental(s).`);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'rentals');
+        } finally {
+          setLoading(false);
+        }
+      }
+    });
+  };
+
   const handleUpdateNote = async () => {
     if (!selectedRental || !editingNoteId || !editingNoteText.trim()) return;
     try {
@@ -518,6 +600,15 @@ export default function RentalsPage() {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          {selectedRentalIds.size > 0 && (
+            <button 
+              onClick={handleBulkDeleteRentals}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-3 py-2 text-xs sm:text-sm font-medium text-white shadow-sm hover:bg-rose-700 transition-colors"
+            >
+              <Trash2 size={16} />
+              <span>Delete Selected ({selectedRentalIds.size})</span>
+            </button>
+          )}
           <button 
             onClick={exportToSheets}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs sm:text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
@@ -555,6 +646,15 @@ export default function RentalsPage() {
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 sticky top-0 z-10">
                 <tr className="text-[11px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-200">
+                  <th className="px-4 py-3 font-semibold w-12 text-center">
+                    <input 
+                      type="checkbox"
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                      checked={filteredRentals.length > 0 && selectedRentalIds.size === filteredRentals.length}
+                      onChange={toggleSelectAllRentals}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </th>
                   <th className="px-6 py-3 font-semibold w-64">Customer Name</th>
                   <th className="px-6 py-3 font-semibold">Vehicle</th>
                   <th className="px-6 py-3 font-semibold">Plate</th>
@@ -566,7 +666,7 @@ export default function RentalsPage() {
               <tbody className="text-sm divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                    <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
                       <div className="flex flex-col items-center gap-2">
                         <Clock className="animate-spin text-indigo-400" size={24} />
                         <span className="font-medium">Loading data...</span>
@@ -583,6 +683,14 @@ export default function RentalsPage() {
                         selectedRental?.id === rental.id && "bg-indigo-50/50"
                       )}
                     >
+                      <td className="px-4 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+                        <input 
+                          type="checkbox"
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                          checked={selectedRentalIds.has(rental.id)}
+                          onChange={(e) => toggleSelectRental(rental.id, e as any)}
+                        />
+                      </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">
@@ -621,7 +729,7 @@ export default function RentalsPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-slate-400">No records found.</td>
+                    <td colSpan={7} className="px-6 py-12 text-center text-slate-400">No records found.</td>
                   </tr>
                 )}
               </tbody>
@@ -954,6 +1062,13 @@ export default function RentalsPage() {
                     <option value="pending">Pending</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
+                  <button 
+                    onClick={() => deleteRental(selectedRental.id)}
+                    className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                    title="Delete Rental"
+                  >
+                    <Trash2 size={20} />
+                  </button>
                   <button 
                     onClick={() => setSelectedRental(null)}
                     className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors"

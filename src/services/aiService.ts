@@ -45,7 +45,7 @@ export async function extractTicketData(imageFile: File): Promise<Partial<Ticket
   }
 }
 
-export async function mapImportColumns(headers: string[], type: 'rentals' | 'tickets'): Promise<Record<string, string>> {
+export async function mapImportColumns(headers: string[], type: 'rentals' | 'tickets' | 'vehicles'): Promise<Record<string, string>> {
   try {
     const response = await fetch('/api/map-columns', {
       method: 'POST',

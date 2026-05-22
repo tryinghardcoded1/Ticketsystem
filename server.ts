@@ -206,6 +206,15 @@ async function startServer() {
           - location
           - status (one of: pending, paid, contested)
         `;
+      } else if (type === 'vehicles') {
+        targetFields = `
+          - make
+          - model
+          - year
+          - plateNumber
+          - color
+          - status (one of: available, rented, maintenance)
+        `;
       }
 
       const prompt = `
