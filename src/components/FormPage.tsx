@@ -146,6 +146,23 @@ export default function FormPage() {
           <p className="text-slate-500 font-medium">Please provide your details to process your rental.</p>
         </div>
 
+        {/* Send to Customer Instruction Banner */}
+        <div className="bg-indigo-50 border border-indigo-100 p-5 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+          <div className="space-y-1">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-800">Send to Customer</h4>
+            <p className="text-xs text-indigo-950 font-medium">Open this link in new tab to send the form to customer:</p>
+            <span className="text-xs font-mono text-indigo-600 truncate block max-w-full select-all font-semibold mt-1">
+              {window.location.origin}/rental-form
+            </span>
+          </div>
+          <button 
+            onClick={() => window.open(window.location.origin + '/rental-form', '_blank')}
+            className="shrink-0 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition-all active:scale-[0.98]"
+          >
+            Open Link in New Tab
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="bg-white shadow-sm border border-slate-200 rounded-3xl p-6 sm:p-10 space-y-8">
           
           <div className="space-y-6">

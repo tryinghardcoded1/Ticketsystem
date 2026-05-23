@@ -89,6 +89,11 @@ export default function RentalsPage() {
   const [editingNoteId, setEditingNoteId] = React.useState<string | null>(null);
   const [editingNoteText, setEditingNoteText] = React.useState('');
 
+  // Document Zoom States
+  const [zoomUrl, setZoomUrl] = React.useState<string | null>(null);
+  const [zoomTitle, setZoomTitle] = React.useState<string>('');
+  const [zoomScale, setZoomScale] = React.useState<number>(1);
+
   // File Upload State
   const [uploadingDoc, setUploadingDoc] = React.useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = React.useState<Record<string, number>>({});
@@ -1229,36 +1234,91 @@ export default function RentalsPage() {
                       { label: "Signature Document", key: 'signatureFile' },
                       { label: "Proof of Insurance", key: 'insuranceFile' },
                     ].map((docItem, i) => (
-                      <div key={i} className="group relative aspect-[16/9] sm:aspect-[4/3] bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
+                      <div 
+                        key={i} 
+                        onClick={() => {
+                          if (selectedRental[docItem.key as keyof Rental]) {
+                            setZoomUrl(selectedRental[docItem.key as keyof Rental] as string);
+                            setZoomTitle(docItem.label);
+                            setZoomScale(1);
+                          }
+                        }}
+                        className={cn(
+                          "group relative aspect-[16/9] sm:aspect-[4/3] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 transition-all",
+                          selectedRental[docItem.key as keyof Rental] ? "cursor-zoom-in hover:shadow-md" : ""
+                        )}
+                      >
+                        {/* Hidden/Default Placeholder state */}
                         <div className="absolute inset-0 flex items-center justify-center text-slate-300">
-                          {selectedRental[docItem.key as keyof Rental] ? <ImageIcon size={32} /> : <FileCheck size={32} />}
+                          <FileCheck size={32} />
                         </div>
+
+                        {/* Image preview */}
                         {selectedRental[docItem.key as keyof Rental] && (
                            <img 
                              src={selectedRental[docItem.key as keyof Rental] as string} 
                              alt={docItem.label}
-                             className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-110"
+                             className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-105"
                            />
                         )}
-                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
+
+                        {/* Central Check Indicator & Completed Text when Document is Uploaded */}
+                        {selectedRental[docItem.key as keyof Rental] && (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/85 backdrop-blur-[1px] z-10 transition-opacity group-hover:opacity-0">
+                            <div className="flex flex-col items-center justify-center bg-purple-50/90 border border-purple-200/50 rounded-2xl p-3 shadow-md scale-95">
+                              <CheckCircle2 size={32} className="text-purple-600 animate-pulse" />
+                              <span className="text-[10px] font-black uppercase tracking-widest text-purple-700 mt-1.5">completed</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Hover Overlay with specific buttons (Zoom/Upload) */}
+                        <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 z-20">
                            {selectedRental[docItem.key as keyof Rental] ? (
-                             <div className="flex items-center gap-2">
-                               <a href={selectedRental[docItem.key as keyof Rental] as string} target="_blank" rel="noopener noreferrer" className="p-2 bg-white rounded-lg text-slate-900 shadow-xl hover:bg-slate-50"><Eye size={16} /></a>
-                               <button onClick={() => triggerUpload(docItem.key)} className="p-2 bg-white rounded-lg text-slate-900 shadow-xl hover:bg-slate-50"><UploadCloud size={16} /></button>
+                             <div className="flex flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                               <div className="flex items-center gap-2">
+                                 <button 
+                                   onClick={() => {
+                                     setZoomUrl(selectedRental[docItem.key as keyof Rental] as string);
+                                     setZoomTitle(docItem.label);
+                                     setZoomScale(1);
+                                   }} 
+                                   className="p-2.5 bg-white rounded-lg text-slate-900 shadow-xl hover:bg-slate-50 transition-colors flex items-center gap-1.5 text-xs font-bold"
+                                   title="Zoom / View Document"
+                                 >
+                                   <Eye size={16} className="text-indigo-600" />
+                                   Zoom Info
+                                 </button>
+                                 <button 
+                                   onClick={() => triggerUpload(docItem.key)} 
+                                   className="p-2.5 bg-white rounded-lg text-slate-900 shadow-xl hover:bg-slate-50 transition-colors"
+                                   title="Re-upload"
+                                 >
+                                   <UploadCloud size={16} className="text-slate-600" />
+                                 </button>
+                               </div>
+                               <span className="text-[9px] text-white/90 font-bold uppercase tracking-wider">Click anywhere to quick zoom</span>
                              </div>
                            ) : uploadingDoc === docItem.key ? (
-                             <div className="text-white flex flex-col items-center gap-2">
-                               <Clock className="animate-spin" size={24} />
+                             <div className="text-white flex flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                               <Clock className="animate-spin text-purple-400" size={24} />
                                <span className="text-xs font-bold">{Math.round(uploadProgress[docItem.key] || 0)}%</span>
                              </div>
                            ) : (
-                             <button onClick={() => triggerUpload(docItem.key)} className="p-2 bg-white rounded-lg text-slate-900 shadow-xl hover:bg-slate-50 text-xs font-bold uppercase flex items-center gap-2">
-                               <UploadCloud size={14} /> Upload
+                             <button 
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 triggerUpload(docItem.key);
+                               }} 
+                               className="p-2.5 bg-white rounded-lg text-slate-900 shadow-xl hover:bg-indigo-50 text-xs font-bold uppercase flex items-center gap-2 transition-all active:scale-95"
+                             >
+                               <UploadCloud size={14} className="text-indigo-600" /> Upload
                              </button>
                            )}
                         </div>
-                        <div className="absolute bottom-0 inset-x-0 p-2 bg-gradient-to-t from-slate-900/80 to-transparent pointer-events-none">
-                          <p className="text-[9px] font-bold text-white truncate uppercase tracking-widest">{docItem.label}</p>
+
+                        <div className="absolute bottom-0 inset-x-0 p-2 bg-gradient-to-t from-slate-900/90 to-transparent pointer-events-none z-10">
+                          <p className="text-[9px] font-black text-white truncate uppercase tracking-widest">{docItem.label}</p>
                         </div>
                       </div>
                     ))}
@@ -1412,6 +1472,96 @@ export default function RentalsPage() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Document Interactive Zoom Lightbox Modal */}
+      <AnimatePresence>
+        {zoomUrl && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[140] bg-slate-950/85 backdrop-blur-md flex flex-col justify-between"
+            >
+              {/* Lightbox Header with controls */}
+              <div className="w-full bg-slate-900/80 border-b border-slate-800 p-4 flex flex-col sm:flex-row items-center justify-between gap-4 z-50 text-white shadow-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                    <CheckCircle2 size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm tracking-wide uppercase text-indigo-400">{zoomTitle}</h3>
+                    <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <span>Verification Completed</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block animate-pulse" />
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Zoom controls */}
+                  <div className="inline-flex bg-slate-800 rounded-xl p-1 border border-slate-700 shadow-inner">
+                    <button 
+                      onClick={() => setZoomScale(s => Math.max(0.5, s - 0.25))}
+                      className="px-3 py-1.5 hover:bg-slate-700 rounded-lg text-white font-bold transition-all text-xs flex items-center gap-1 active:scale-95"
+                      disabled={zoomScale <= 0.5}
+                      title="Zoom Out"
+                    >
+                      Zoom -
+                    </button>
+                    <span className="text-xs font-mono text-slate-300 w-16 text-center flex items-center justify-center font-bold">
+                      {Math.round(zoomScale * 100)}%
+                    </span>
+                    <button 
+                      onClick={() => setZoomScale(s => Math.min(3, s + 0.25))}
+                      className="px-3 py-1.5 hover:bg-slate-700 rounded-lg text-white font-bold transition-all text-xs flex items-center gap-1 active:scale-95"
+                      disabled={zoomScale >= 3}
+                      title="Zoom In"
+                    >
+                      Zoom +
+                    </button>
+                  </div>
+                  
+                  <button 
+                    onClick={() => setZoomScale(1)}
+                    className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700/60 rounded-xl text-xs font-semibold text-slate-300 transition-all hover:text-white"
+                  >
+                    Reset Zoom
+                  </button>
+                  <div className="h-6 w-px bg-slate-800 hidden sm:block" />
+                  <button 
+                    onClick={() => setZoomUrl(null)}
+                    className="p-2.5 bg-rose-600 hover:bg-rose-500 rounded-xl text-white transition-all shadow-md active:scale-95 flex items-center gap-1.5 text-xs font-bold"
+                    title="Close Lightbox"
+                  >
+                    <X size={16} />
+                    <span>Close</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Lightbox Content Area */}
+              <div 
+                className="w-full flex-1 flex items-center justify-center overflow-auto p-4 sm:p-12 relative cursor-zoom-out"
+                onClick={() => setZoomUrl(null)}
+              >
+                <div 
+                  className="relative select-none rounded-2xl bg-slate-900/50 border border-slate-800 p-2 shadow-2xl transition-transform duration-200 ease-out"
+                  style={{ transform: `scale(${zoomScale})` }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <img 
+                    src={zoomUrl} 
+                    alt={zoomTitle} 
+                    className="object-contain max-h-[70vh] max-w-[85vw] rounded-xl ring-1 ring-slate-800"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>
