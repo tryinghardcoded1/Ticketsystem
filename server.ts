@@ -214,6 +214,9 @@ async function startServer() {
           - plateNumber
           - color
           - status (one of: available, rented, maintenance)
+          - registrant
+          - lienholder
+          - notes
         `;
       }
 

@@ -1,5 +1,5 @@
 export type RentalStatus = 'active' | 'completed' | 'pending' | 'cancelled';
-export type TicketStatus = 'unpaid' | 'paid' | 'contested';
+export type TicketStatus = 'unpaid' | 'paid' | 'contested' | 'transferred' | 'matched' | 'unmatched';
 export type VehicleStatus = 'available' | 'rented' | 'maintenance';
 
 export interface Note {
@@ -102,5 +102,8 @@ export interface Vehicle {
   year: number;
   color: string;
   status: VehicleStatus;
+  registrant?: string;
+  lienholder?: string;
+  notes?: string;
   createdAt: any;
 }

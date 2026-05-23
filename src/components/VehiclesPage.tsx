@@ -17,7 +17,7 @@ import {
   Download,
   Database
 } from 'lucide-react';
-import { collection, getDocs, query, orderBy, addDoc, serverTimestamp, doc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, addDoc, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
 import { db, auth, OperationType, handleFirestoreError } from '../lib/firebase';
@@ -32,6 +32,21 @@ export default function VehiclesPage() {
   const [searchTerm, setSearchTerm] = React.useState('');
 
   const [selectedVehicleIds, setSelectedVehicleIds] = React.useState<Set<string>>(new Set());
+
+  // Vehicle Modal States
+  const [isVehicleModalOpen, setIsVehicleModalOpen] = React.useState(false);
+  const [editingVehicleId, setEditingVehicleId] = React.useState<string | null>(null);
+  const [vehicleForm, setVehicleForm] = React.useState({
+    make: '',
+    model: '',
+    year: new Date().getFullYear(),
+    plateNumber: '',
+    color: '',
+    status: 'available' as Vehicle['status'],
+    registrant: '',
+    lienholder: '',
+    notes: ''
+  });
 
   // Import States
   const [isImportModalOpen, setIsImportModalOpen] = React.useState(false);
@@ -206,13 +221,34 @@ export default function VehiclesPage() {
       try {
         for (const row of rows) {
           const rawStatus = (row[mapping.status] || 'available').toString().trim().toLowerCase();
-          const vehicleData = {
-            make: row[mapping.make] || 'Ford',
-            model: row[mapping.model] || 'Utility',
+          
+          // Heuristic to handle "VEHICLE" as Make/Model
+          let make = 'Ford';
+          let model = 'Utility';
+          const vehicleRaw = (row[mapping.make] || row[mapping.model] || row['VEHICLE'] || row['Vehicle'] || row['vehicle'] || '').toString().trim();
+          if (vehicleRaw) {
+            const parts = vehicleRaw.split(/\s+/);
+            if (parts.length > 0) {
+              make = parts[0];
+            }
+            if (parts.length > 1) {
+              model = parts.slice(1).join(' ');
+            }
+          } else {
+            make = (row[mapping.make] || 'Ford').toString().trim();
+            model = (row[mapping.model] || 'Utility').toString().trim();
+          }
+
+          const vehicleData: any = {
+            make,
+            model,
             year: Number(row[mapping.year]) || 2022,
-            plateNumber: row[mapping.plateNumber] || 'TBD-0000',
-            color: row[mapping.color] || 'White',
+            plateNumber: (row[mapping.plateNumber] || row['Plate #'] || row['Plate'] || row['plateNumber'] || 'TBD-0000').toString().trim(),
+            color: (row[mapping.color] || row['Colors'] || row['Color'] || row['color'] || 'White').toString().trim(),
             status: ['available', 'rented', 'maintenance'].includes(rawStatus) ? rawStatus : 'available',
+            registrant: (row[mapping.registrant] || row['REGISTRANT'] || row['Registrant'] || row['registrant'] || '').toString().trim(),
+            lienholder: (row[mapping.lienholder] || row['Lienholder'] || row['lienholder'] || '').toString().trim(),
+            notes: (row[mapping.notes] || row['NOTES'] || row['Notes'] || row['notes'] || '').toString().trim(),
             createdAt: serverTimestamp()
           };
 
@@ -257,6 +293,90 @@ export default function VehiclesPage() {
         }
       }
     });
+  };
+
+  const openAddVehicleModal = () => {
+    setEditingVehicleId(null);
+    setVehicleForm({
+      make: '',
+      model: '',
+      year: new Date().getFullYear(),
+      plateNumber: '',
+      color: '',
+      status: 'available',
+      registrant: '',
+      lienholder: '',
+      notes: ''
+    });
+    setIsVehicleModalOpen(true);
+  };
+
+  const openEditVehicleModal = (v: Vehicle) => {
+    setEditingVehicleId(v.id);
+    setVehicleForm({
+      make: v.make || '',
+      model: v.model || '',
+      year: Number(v.year) || new Date().getFullYear(),
+      plateNumber: v.plateNumber || '',
+      color: v.color || '',
+      status: v.status || 'available',
+      registrant: v.registrant || '',
+      lienholder: v.lienholder || '',
+      notes: v.notes || ''
+    });
+    setIsVehicleModalOpen(true);
+  };
+
+  const handleVehicleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vehicleForm.make || !vehicleForm.model || !vehicleForm.plateNumber) {
+      alert('Please fill out the Make, Model, and Plate Number.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (editingVehicleId) {
+        // Edit flow
+        const ref = doc(db, 'vehicles', editingVehicleId);
+        await updateDoc(ref, {
+          ...vehicleForm,
+          year: Number(vehicleForm.year) || 2022
+        });
+        
+        setVehicles(prev => prev.map(v => v.id === editingVehicleId ? {
+          ...v,
+          ...vehicleForm,
+          year: Number(vehicleForm.year) || 2022
+        } : v));
+        
+        setIsVehicleModalOpen(false);
+        alert('Vehicle updated successfully.');
+      } else {
+        // Create flow
+        const fleetRef = collection(db, 'vehicles');
+        const docRef = await addDoc(fleetRef, {
+          ...vehicleForm,
+          year: Number(vehicleForm.year) || 2022,
+          createdAt: serverTimestamp()
+        });
+        
+        const newlyAdded: Vehicle = {
+          id: docRef.id,
+          ...vehicleForm,
+          year: Number(vehicleForm.year) || 2022,
+          createdAt: new Date()
+        };
+        
+        setVehicles(prev => [newlyAdded, ...prev]);
+        setIsVehicleModalOpen(false);
+        alert('Vehicle added successfully.');
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'vehicles');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchVehicles = async () => {
@@ -334,7 +454,10 @@ export default function VehiclesPage() {
             <span>Import</span>
           </button>
 
-          <button className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-[0.98] flex items-center justify-center gap-2">
+          <button 
+            onClick={openAddVehicleModal}
+            className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-[0.98] flex items-center justify-center gap-2"
+          >
             <Plus size={18} />
             Add Vehicle
           </button>
@@ -385,15 +508,43 @@ export default function VehiclesPage() {
                     >
                       <Trash2 size={16} />
                     </button>
-                    <button className="p-2 text-slate-400 hover:text-slate-600 transition-colors">
+                    <button 
+                      onClick={() => openEditVehicleModal(vehicle)}
+                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+                      title="Edit Vehicle"
+                    >
                       <Settings size={18} />
                     </button>
                   </div>
                 </div>
+
+                {(vehicle.registrant || vehicle.lienholder) && (
+                  <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-xs">
+                    {vehicle.registrant && (
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="font-medium text-slate-400">Registrant:</span>
+                        <span className="text-slate-700 font-bold max-w-[150px] truncate">{vehicle.registrant}</span>
+                      </div>
+                    )}
+                    {vehicle.lienholder && (
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="font-medium text-slate-400">Lienholder:</span>
+                        <span className="text-slate-700 font-bold max-w-[150px] truncate">{vehicle.lienholder}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {vehicle.notes && (
+                  <div className="mt-2.5 p-2 bg-slate-50/80 rounded-lg border border-slate-100">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Notes</span>
+                    <p className="text-[11px] text-slate-600 italic line-clamp-2 leading-relaxed">{vehicle.notes}</p>
+                  </div>
+                )}
                 
                 <div className="mt-4 flex items-center justify-between border-t border-slate-50 pt-4">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    {vehicle.color}
+                    {vehicle.color || 'No Color Specified'}
                   </div>
                   <button className="flex items-center gap-1 text-xs font-bold text-indigo-600 hover:underline">
                     Manage <ChevronRight size={14} />
@@ -572,6 +723,169 @@ export default function VehiclesPage() {
                   Confirm Import
                 </button>
               </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Add / Edit Vehicle Modal */}
+      <AnimatePresence>
+        {isVehicleModalOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80]"
+              onClick={() => setIsVehicleModalOpen(false)}
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl bg-white rounded-2xl shadow-2xl z-[90] overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    {editingVehicleId ? 'Edit Vehicle Information' : 'Add New Vehicle to Fleet'}
+                  </h3>
+                  <p className="text-xs text-slate-500">Provide registration details, colors, and notes below</p>
+                </div>
+                <button 
+                  onClick={() => setIsVehicleModalOpen(false)}
+                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-400"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleVehicleFormSubmit}>
+                <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Make *</label>
+                      <input 
+                        type="text" 
+                        required
+                        placeholder="e.g. Ford, Toyota"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={vehicleForm.make}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, make: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Model *</label>
+                      <input 
+                        type="text" 
+                        required
+                        placeholder="e.g. Explorer, Camry"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={vehicleForm.model}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, model: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Year</label>
+                      <input 
+                        type="number" 
+                        min="1900"
+                        max={new Date().getFullYear() + 2}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={vehicleForm.year}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, year: Number(e.target.value) })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Plate Number *</label>
+                      <input 
+                        type="text" 
+                        required
+                        placeholder="e.g. ABC-1234"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none uppercase"
+                        value={vehicleForm.plateNumber}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, plateNumber: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Colors</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. Metallic Black"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={vehicleForm.color}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, color: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Registrant</label>
+                      <input 
+                        type="text" 
+                        placeholder="Registrant Name"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={vehicleForm.registrant}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, registrant: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Lienholder</label>
+                      <input 
+                        type="text" 
+                        placeholder="Lienholder name"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={vehicleForm.lienholder}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, lienholder: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Status</label>
+                    <select
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                      value={vehicleForm.status}
+                      onChange={(e) => setVehicleForm({ ...vehicleForm, status: e.target.value as any })}
+                    >
+                      <option value="available">Available</option>
+                      <option value="rented">Rented</option>
+                      <option value="maintenance">Maintenance</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Notes</label>
+                    <textarea
+                      placeholder="Enter optional notes..."
+                      rows={3}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                      value={vehicleForm.notes}
+                      onChange={(e) => setVehicleForm({ ...vehicleForm, notes: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="p-6 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+                  <button 
+                    type="button"
+                    onClick={() => setIsVehicleModalOpen(false)}
+                    className="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    className="px-6 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-sm flex items-center gap-2"
+                  >
+                    {editingVehicleId ? 'Save Changes' : 'Add Vehicle'}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </>
         )}

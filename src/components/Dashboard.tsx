@@ -158,7 +158,13 @@ export default function Dashboard({ rentals, tickets }: DashboardProps) {
               <div key={ticket.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 transition-colors hover:bg-slate-100 group">
                 <div className={cn(
                   "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg shadow-sm border",
-                  ticket.status === 'unpaid' ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-emerald-50 text-emerald-600 border-emerald-100"
+                  ticket.status === 'unpaid' ? "bg-rose-50 text-rose-600 border-rose-100" :
+                  ticket.status === 'paid' ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                  ticket.status === 'contested' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                  ticket.status === 'transferred' ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
+                  ticket.status === 'matched' ? "bg-teal-50 text-teal-600 border-teal-100" :
+                  ticket.status === 'unmatched' ? "bg-stone-50 text-stone-600 border-stone-100" :
+                  "bg-slate-50 text-slate-500 border-slate-100"
                 )}>
                   <TicketIcon size={18} />
                 </div>

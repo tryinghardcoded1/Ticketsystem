@@ -213,6 +213,8 @@ export default function TicketUploadPage() {
         }
       }
 
+      const matchSuccess = suggestedMatches.length > 0 && suggestedMatches[0].confidence > 0.5;
+
       // 3. Save to Firestore tickets collection
       const ticketPayload = {
         plateNumber: extracted.plate_number || 'UNKNOWN',
@@ -224,7 +226,7 @@ export default function TicketUploadPage() {
         rentalId,
         matchConfidence,
         suggestions: suggestedMatches,
-        status: 'unpaid',
+        status: matchSuccess ? 'matched' : 'unmatched',
         ticketImage: imgData.dataUrl,
         createdAt: serverTimestamp(),
         

@@ -360,6 +360,7 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
           }
 
           // 3. Save Ticket
+          const matchSuccess = suggestedMatches.length > 0 && suggestedMatches[0].confidence > 0.6;
           await addDoc(collection(db, 'tickets'), {
             plateNumber: extracted.plateNumber,
             violationDate: Timestamp.fromDate(vDate),
@@ -372,7 +373,7 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
             rentalId,
             matchConfidence,
             suggestions: suggestedMatches,
-            status: 'unpaid',
+            status: matchSuccess ? 'matched' : 'unmatched',
             createdAt: serverTimestamp(),
           }).catch(e => {
             handleFirestoreError(e, OperationType.CREATE, 'tickets');
@@ -654,6 +655,33 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
             >
               Contested
             </button>
+            <button 
+              onClick={() => setStatusFilter('transferred')}
+              className={cn(
+                "px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest rounded-full border transition-all",
+                statusFilter === 'transferred' ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-500 border-indigo-100 hover:bg-indigo-50"
+              )}
+            >
+              Transferred to Fleet
+            </button>
+            <button 
+              onClick={() => setStatusFilter('matched')}
+              className={cn(
+                "px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest rounded-full border transition-all",
+                statusFilter === 'matched' ? "bg-teal-600 text-white border-teal-600" : "bg-white text-teal-500 border-teal-100 hover:bg-teal-50"
+              )}
+            >
+              Matched
+            </button>
+            <button 
+              onClick={() => setStatusFilter('unmatched')}
+              className={cn(
+                "px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest rounded-full border transition-all",
+                statusFilter === 'unmatched' ? "bg-stone-600 text-white border-stone-600" : "bg-white text-stone-500 border-stone-100 hover:bg-stone-50"
+              )}
+            >
+              Unmatched
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -778,14 +806,18 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
                     <td className="px-4 py-4 whitespace-nowrap text-sm font-bold text-rose-600">
                       ${ticket.amount.toFixed(2)}
                     </td>
-                    <td className="px-4 py-4 whitespace-nowrap">
+                    <td className="px-4 py-4 whitespace-nowrap bg-white">
                       <span className={cn(
-                        "rounded-full px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-widest inline-block",
-                        ticket.status === 'unpaid' ? "bg-rose-100 text-rose-700 border border-rose-200" : 
-                        ticket.status === 'paid' ? "bg-emerald-100 text-emerald-700 border border-emerald-200" :
-                        "bg-slate-100 text-slate-500 border border-slate-200"
+                        "rounded-full px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-widest inline-block border",
+                        ticket.status === 'unpaid' ? "bg-rose-50 text-rose-600 border-rose-200" : 
+                        ticket.status === 'paid' ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+                        ticket.status === 'contested' ? "bg-amber-50 text-amber-600 border-amber-200" :
+                        ticket.status === 'transferred' ? "bg-indigo-50 text-indigo-600 border-indigo-200" :
+                        ticket.status === 'matched' ? "bg-teal-50 text-teal-600 border-teal-200" :
+                        ticket.status === 'unmatched' ? "bg-stone-50 text-stone-600 border-stone-200" :
+                        "bg-slate-50 text-slate-500 border-slate-200"
                       )}>
-                        {ticket.status}
+                        {ticket.status === 'transferred' ? 'transferred to fleet' : ticket.status}
                       </span>
                     </td>
                     <td className="px-4 py-4 whitespace-nowrap">
@@ -1199,6 +1231,9 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
                     <option value="unpaid">Mark as Unpaid</option>
                     <option value="paid">Mark as Paid</option>
                     <option value="contested">Mark as Contested</option>
+                    <option value="transferred">Transferred to Fleet</option>
+                    <option value="matched">Mark as Matched</option>
+                    <option value="unmatched">Mark as Unmatched</option>
                   </select>
                   <button 
                     onClick={() => deleteTicket(selectedTicket.id)}

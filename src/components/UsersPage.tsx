@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, addDoc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, query, orderBy, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { User as UserIcon, Plus, Mail, Shield, ShieldAlert, Loader2, Search } from 'lucide-react';
 
@@ -16,6 +16,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<'ADMIN' | 'STAFF'>('STAFF');
@@ -40,23 +41,51 @@ export default function UsersPage() {
     fetchUsers();
   }, []);
 
+  const openAddUserModal = () => {
+    setEditingUserId(null);
+    setNewEmail('');
+    setNewRole('STAFF');
+    setNewDisplayName('');
+    setShowAddModal(true);
+  };
+
+  const openEditUserModal = (user: SystemUser) => {
+    setEditingUserId(user.id);
+    setNewEmail(user.email);
+    setNewRole(user.role === 'SUPER_ADMIN' ? 'ADMIN' : user.role);
+    setNewDisplayName(user.displayName || '');
+    setShowAddModal(true);
+  };
+
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'users'), {
-        email: newEmail.toLowerCase(),
-        role: newRole,
-        displayName: newDisplayName,
-        createdAt: serverTimestamp()
-      });
+      if (editingUserId) {
+        const userRef = doc(db, 'users', editingUserId);
+        await updateDoc(userRef, {
+          email: newEmail.toLowerCase().trim(),
+          role: newRole,
+          displayName: newDisplayName.trim()
+        });
+        alert("User updated successfully.");
+      } else {
+        await addDoc(collection(db, 'users'), {
+          email: newEmail.toLowerCase().trim(),
+          role: newRole,
+          displayName: newDisplayName.trim(),
+          createdAt: serverTimestamp()
+        });
+        alert("User added successfully.");
+      }
       setShowAddModal(false);
       setNewEmail('');
       setNewDisplayName('');
+      setEditingUserId(null);
       fetchUsers();
     } catch (err) {
-      console.error("Error adding user:", err);
-      alert("Failed to add user to database.");
+      console.error("Error saving user:", err);
+      alert("Failed to save user details.");
     } finally {
       setSubmitting(false);
     }
@@ -75,7 +104,7 @@ export default function UsersPage() {
           <p className="text-sm text-slate-500">Manage internal staff access and roles.</p>
         </div>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={openAddUserModal}
           className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-95"
         >
           <Plus size={18} />
@@ -150,7 +179,12 @@ export default function UsersPage() {
                       <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600">Active</span>
                     </td>
                     <td className="px-6 py-4">
-                      <button className="text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors">Edit</button>
+                      <button 
+                        onClick={() => openEditUserModal(user)}
+                        className="text-xs font-bold text-slate-400 hover:text-indigo-600 hover:underline transition-all"
+                      >
+                        Edit
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -168,9 +202,17 @@ export default function UsersPage() {
 
       {showAddModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowAddModal(false)} />
+          <div 
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" 
+            onClick={() => {
+              setShowAddModal(false);
+              setEditingUserId(null);
+            }} 
+          />
           <div className="relative w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl border border-slate-200">
-            <h3 className="text-xl font-bold text-slate-800 mb-6">Add New User</h3>
+            <h3 className="text-xl font-bold text-slate-800 mb-6 font-sans">
+              {editingUserId ? 'Edit System User' : 'Add New User'}
+            </h3>
             <form onSubmit={handleAddUser} className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Full Name</label>
@@ -215,7 +257,10 @@ export default function UsersPage() {
               <div className="flex gap-3 pt-6">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setEditingUserId(null);
+                  }}
                   className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors"
                 >
                   Cancel
