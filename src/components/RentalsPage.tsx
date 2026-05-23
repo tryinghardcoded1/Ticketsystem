@@ -22,7 +22,8 @@ import {
   Eye,
   Trash2,
   UploadCloud,
-  Edit2
+  Edit2,
+  ExternalLink
 } from 'lucide-react';
 import { 
   collection, 
@@ -555,6 +556,37 @@ export default function RentalsPage() {
     }
   };
 
+  const exportToCSV = () => {
+    if (!filteredRentals.length) {
+      alert("No data to export.");
+      return;
+    }
+    try {
+      const headers = ['Customer Name', 'Vehicle', 'Plate', 'Phone', 'Start Date', 'End Date', 'Status'];
+      const rows = filteredRentals.map(r => [
+        r.customerName || '',
+        r.vehicle || '',
+        r.plateNumber || '',
+        r.phone || 'N/A',
+        formatDate(r.startDate),
+        formatDate(r.endDate),
+        r.status || ''
+      ]);
+      const csvString = Papa.unparse([headers, ...rows]);
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `Rentals_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error: any) {
+      alert('CSV Export failed: ' + error.message);
+    }
+  };
+
   const exportToSheets = async () => {
     if (!filteredRentals.length) return;
     try {
@@ -575,7 +607,9 @@ export default function RentalsPage() {
       await updateSheetValues(spreadsheetId, 'Sheet1!A1', [headers, ...rows]);
       window.open(`https://docs.google.com/spreadsheets/d/${spreadsheetId}`, '_blank');
     } catch (error: any) {
-      alert('Export failed: ' + error.message);
+      console.error('Export failed:', error);
+      alert('Sheets export failed. Downloading CSV file instead...');
+      exportToCSV();
     }
   };
 
@@ -610,11 +644,20 @@ export default function RentalsPage() {
             </button>
           )}
           <button 
-            onClick={exportToSheets}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs sm:text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+            onClick={exportToCSV}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs sm:text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+            title="Download CSV"
           >
             <Download size={16} />
-            <span className="hidden xs:inline">Export</span>
+            <span>Download CSV</span>
+          </button>
+          <button 
+            onClick={exportToSheets}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs sm:text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+            title="Export to Sheets"
+          >
+            <ExternalLink size={16} />
+            <span className="hidden xs:inline">Sheets</span>
           </button>
           <button 
             onClick={() => setIsImportModalOpen(true)}

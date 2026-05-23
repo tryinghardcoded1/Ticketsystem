@@ -22,14 +22,16 @@ import {
   MessageSquare,
   Send,
   Trash2,
-  Download
+  Download,
+  UploadCloud
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, getDocs, query, orderBy, where, Timestamp, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth, OperationType, handleFirestoreError } from '../lib/firebase';
 import { cn, formatDate } from '../lib/utils';
 import { Ticket, Rental } from '../types';
-import { extractTicketData } from '../services/aiService';
+import { extractTicketData, mapImportColumns } from '../services/aiService';
+import Papa from 'papaparse';
 
 import { createSpreadsheet, updateSheetValues } from '../services/sheetsService';
 
@@ -82,6 +84,14 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [editData, setEditData] = React.useState<Partial<Ticket>>({});
   const [showImageViewer, setShowImageViewer] = React.useState(false);
+
+  // Import state variables
+  const [isImportModalOpen, setIsImportModalOpen] = React.useState(false);
+  const [importText, setImportText] = React.useState('');
+  const [importFile, setImportFile] = React.useState<File | null>(null);
+  const [isImporting, setIsImporting] = React.useState(false);
+  const [importStatus, setImportStatus] = React.useState('');
+  const [shouldClearBeforeImport, setShouldClearBeforeImport] = React.useState(false);
 
   const fetchNotes = async (ticketId: string) => {
     setLoadingNotes(true);
@@ -220,6 +230,208 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
       handleFirestoreError(error, OperationType.LIST, 'tickets');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const processImportData = (data: string) => {
+    return new Promise<any[]>((resolve, reject) => {
+      Papa.parse(data, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => resolve(results.data),
+        error: (error) => reject(error)
+      });
+    });
+  };
+
+  const handleBulkImport = async () => {
+    if (!importFile && !importText.trim()) return;
+    setIsImporting(true);
+    setImportStatus('Parsing data...');
+
+    try {
+      let rows: any[] = [];
+      
+      if (importFile) {
+        rows = await new Promise<any[]>((resolve, reject) => {
+          Papa.parse(importFile, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => resolve(results.data),
+            error: (error) => reject(error)
+          });
+        });
+      } else {
+        rows = await processImportData(importText);
+      }
+
+      if (rows.length === 0) {
+        throw new Error("No data rows found. Ensure your source has a header row and at least one row of data beneath it.");
+      }
+
+      if (shouldClearBeforeImport) {
+        setImportStatus('Clearing existing records...');
+        try {
+          const q = query(collection(db, 'tickets'));
+          const snapshot = await getDocs(q);
+          const deletePromises = snapshot.docs.map(d => deleteDoc(doc(db, 'tickets', d.id)));
+          await Promise.all(deletePromises);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'tickets');
+        }
+      }
+
+      setImportStatus(`Mapping ${rows.length} rows with AI...`);
+
+      // Use server-side mapping service
+      const mapping = await mapImportColumns(Object.keys(rows[0]), 'tickets');
+
+      setImportStatus('Syncing & Matching to Rentals...');
+
+      const ticketsRef = collection(db, 'tickets');
+      
+      try {
+        for (const row of rows) {
+          const plateNumber = row[mapping.plateNumber] || 'UNKNOWN';
+          const amountStr = row[mapping.amount] || '0';
+          const amount = parseFloat(amountStr.replace(/[^0-9.]/g, '')) || 0;
+          const violationType = row[mapping.violationType] || 'Unknown Violation';
+          const location = row[mapping.location] || 'Unknown Location';
+          
+          let violationDate: Date = new Date();
+          if (row[mapping.violationDate]) {
+            const d = new Date(row[mapping.violationDate]);
+            if (!isNaN(d.getTime())) {
+              violationDate = d;
+            }
+          }
+
+          // Search rentals for matching plate number within date range
+          let matchedCustomer = '';
+          let rentalId = '';
+          let matchConfidence = 0;
+          let suggestedMatches: any[] = [];
+
+          if (rentals.length > 0) {
+            const potentialMatches = rentals.map(r => {
+              let plateScore = 0;
+              let dateScore = 0;
+              
+              // Plate matching
+              const p1 = (r.plateNumber || '').toUpperCase().trim();
+              const p2 = plateNumber.toUpperCase().trim();
+              if (p1 === p2) {
+                plateScore = 1.0;
+              } else if (p1 && p2 && (p1.includes(p2) || p2.includes(p1))) {
+                plateScore = 0.8;
+              }
+              
+              // Date matching range logical check
+              const vTime = violationDate.getTime();
+              const start = r.startDate instanceof Timestamp ? r.startDate.toDate() : new Date(r.startDate);
+              const end = r.endDate instanceof Timestamp ? r.endDate.toDate() : new Date(r.endDate);
+              
+              if (!isNaN(vTime) && start && end) {
+                if (vTime >= start.getTime() && vTime <= end.getTime()) {
+                  dateScore = 1.0;
+                } else {
+                  const margin = 3 * 24 * 60 * 60 * 1000; // 3 day limit
+                  const diff = Math.min(Math.abs(vTime - start.getTime()), Math.abs(vTime - end.getTime()));
+                  if (diff < margin) {
+                    dateScore = 0.5;
+                  }
+                }
+              }
+              
+              // Combined weighted score: Plate (65%), Date (35%)
+              const totalScore = (plateScore * 0.65) + (dateScore * 0.35);
+              return {
+                rentalId: r.id,
+                customerName: r.customerName,
+                plateNumber: r.plateNumber,
+                vehicle: r.vehicle,
+                confidence: totalScore
+              };
+            });
+
+            suggestedMatches = potentialMatches
+              .filter(m => m.confidence > 0.45)
+              .sort((a, b) => b.confidence - a.confidence)
+              .slice(0, 5);
+
+            if (suggestedMatches.length > 0 && suggestedMatches[0].confidence > 0.6) {
+              matchedCustomer = suggestedMatches[0].customerName;
+              rentalId = suggestedMatches[0].rentalId;
+              matchConfidence = suggestedMatches[0].confidence;
+            }
+          }
+
+          const matchSuccess = matchedCustomer && matchConfidence > 0.6;
+
+          const ticketData: any = {
+            plateNumber,
+            violationDate: Timestamp.fromDate(violationDate),
+            amount,
+            violationType,
+            location,
+            matchedCustomer,
+            rentalId,
+            matchConfidence,
+            suggestions: suggestedMatches,
+            status: matchSuccess ? 'matched' : 'unmatched',
+            createdAt: serverTimestamp()
+          };
+
+          await addDoc(ticketsRef, ticketData);
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'tickets');
+      }
+
+      setImportStatus('Import complete!');
+      setImportText('');
+      setTimeout(() => {
+        setIsImportModalOpen(false);
+        setImportStatus('');
+        fetchTickets();
+      }, 1500);
+
+    } catch (error: any) {
+      console.error("Import failed:", error);
+      setImportStatus(`Error: ${error.message || error}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const exportToCSV = () => {
+    if (!filteredTickets.length) {
+      alert("No data to export.");
+      return;
+    }
+    try {
+      const headers = ['Plate Number', 'Violation Date', 'Amount', 'Status', 'Renter', 'Location', 'Ticket ID'];
+      const rows = filteredTickets.map(t => [
+        t.plateNumber || '',
+        formatDate(t.violationDate),
+        t.amount || 0,
+        t.status || '',
+        t.matchedCustomer || 'Unmatched',
+        t.location || 'Unknown',
+        t.id || ''
+      ]);
+      const csvString = Papa.unparse([headers, ...rows]);
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `Traffic_Violations_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error: any) {
+      alert('CSV Export failed: ' + error.message);
     }
   };
 
@@ -704,11 +916,25 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
             </button>
           )}
           <button 
+            onClick={exportToCSV}
+            className="bg-indigo-50 border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
+          >
+            <Download size={18} />
+            Download CSV
+          </button>
+          <button 
             onClick={exportToSheets}
             className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
           >
-            <Download size={18} />
-            Export to Sheets
+            <ExternalLink size={18} />
+            Sheets
+          </button>
+          <button 
+            onClick={() => setIsImportModalOpen(true)}
+            className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+          >
+            <UploadCloud size={18} />
+            Import CSV
           </button>
           <button 
             onClick={() => setUploadModalOpen(true)}
@@ -1437,6 +1663,134 @@ export default function TicketsPage({ userProfile }: TicketsPageProps) {
               </div>
             </motion.div>
           </motion.div>
+        )}
+
+        {isImportModalOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80]"
+              onClick={() => !isImporting && setIsImportModalOpen(false)}
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-white rounded-2xl shadow-2xl z-[90] overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Import Traffic Violations</h3>
+                  <p className="text-xs text-slate-500">Provide CSV file or plain text data below</p>
+                </div>
+                <button 
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-400"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex gap-3">
+                  <AlertCircle className="text-amber-600 shrink-0" size={20} />
+                  <div className="text-[11px] text-amber-800 leading-relaxed">
+                    <p className="font-bold mb-1 uppercase tracking-wider">Required Column Headers:</p>
+                    <p>Make sure your file has headers representing: <b>Plate Number, Violation Date, Amount, Location, and Violation Type</b>. Our AI will automatically map unmatched column names!</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Upload CSV File</label>
+                  <label className={cn(
+                    "flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 hover:bg-slate-100 hover:border-indigo-400 transition-all cursor-pointer group",
+                    importFile && "bg-indigo-50 border-indigo-200"
+                  )}>
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                      {importFile ? (
+                        <>
+                          <CheckCircle2 className="w-8 h-8 text-indigo-500 mb-2" />
+                          <p className="text-xs font-bold text-indigo-900">{importFile.name}</p>
+                          <p className="text-[10px] text-indigo-500 mt-1">{(importFile.size / 1024).toFixed(1)} KB • Ready to import</p>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-8 h-8 text-slate-300 group-hover:text-indigo-400 transition-colors mb-2" />
+                          <p className="text-xs text-slate-500 font-bold group-hover:text-slate-700 transition-colors">Drop CSV file here or click</p>
+                          <p className="text-[10px] text-slate-400 mt-1">UTF-8 Comma-separated values only</p>
+                        </>
+                      )}
+                    </div>
+                    <input 
+                      type="file" 
+                      className="hidden" 
+                      accept=".csv" 
+                      onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                    />
+                  </label>
+                </div>
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-100"></div>
+                  </div>
+                  <div className="relative flex justify-center text-[10px] uppercase font-bold tracking-widest">
+                    <span className="bg-white px-2 text-slate-300">Or Paste Text</span>
+                  </div>
+                </div>
+
+                <textarea
+                  className="w-full h-24 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs font-mono focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                  placeholder="Paste csv raw text here (e.g. plateNumber,violationDate,amount...)"
+                  value={importText}
+                  onChange={(e) => {
+                    setImportText(e.target.value);
+                    if (e.target.value.trim()) setImportFile(null);
+                  }}
+                  disabled={isImporting}
+                />
+
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer group">
+                  <input 
+                    type="checkbox" 
+                    checked={shouldClearBeforeImport} 
+                    onChange={(e) => setShouldClearBeforeImport(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div className="flex-1">
+                    <p className="text-xs font-semibold text-slate-700 group-hover:text-indigo-600 transition-colors">Wipe database before import</p>
+                    <p className="text-[10px] text-slate-400">Purges all current traffic violations before loading</p>
+                  </div>
+                </label>
+
+                {importStatus && (
+                  <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-center">
+                    <p className="text-xs font-medium text-indigo-800 animate-pulse">{importStatus}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+                <button 
+                  onClick={() => setIsImportModalOpen(false)}
+                  disabled={isImporting}
+                  className="px-4 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-white transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleBulkImport}
+                  disabled={isImporting || (!importFile && !importText.trim())}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                >
+                  {isImporting && <Loader2 size={14} className="animate-spin" />}
+                  {isImporting ? 'Processing AI Matching...' : 'Start Sync & Match'}
+                </button>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

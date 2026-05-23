@@ -510,10 +510,10 @@ export default function VehiclesPage() {
                     </button>
                     <button 
                       onClick={() => openEditVehicleModal(vehicle)}
-                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+                      className="p-2 text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded-lg transition-colors"
                       title="Edit Vehicle"
                     >
-                      <Settings size={18} />
+                      <Settings size={22} className="text-purple-600" />
                     </button>
                   </div>
                 </div>
@@ -546,9 +546,6 @@ export default function VehiclesPage() {
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                     {vehicle.color || 'No Color Specified'}
                   </div>
-                  <button className="flex items-center gap-1 text-xs font-bold text-indigo-600 hover:underline">
-                    Manage <ChevronRight size={14} />
-                  </button>
                 </div>
               </div>
             </div>
